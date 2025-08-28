@@ -1,0 +1,14 @@
+[Unit]
+Description=Fail2Ban Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER_HERE
+WorkingDirectory=/opt/fail2ban-telegram-bot
+ExecStart=/opt/fail2ban-telegram-bot/venv/bin/python /opt/fail2ban-telegram-bot/bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
