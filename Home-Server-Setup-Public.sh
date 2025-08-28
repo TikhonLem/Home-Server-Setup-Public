@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# === Fail2Ban Telegram Bot Auto Setup Script ===
-# Подготовлен для установки на чистую Ubuntu Server
+# === Fail2Ban Telegram Bot Auto Setup Script (Public Version) ===
+# Подготовлен для установки на чистую Ubuntu Server.
+# ВСЕ ЛИЧНЫЕ ДАННЫЕ ДОЛЖНЫ БЫТЬ ЗАМЕНЕНЫ ПОЛЬЗОВАТЕЛЕМ ПЕРЕД ЗАПУСКОМ!
 
 LOG_FILE="/var/log/setup-server.log"
 
@@ -30,18 +31,14 @@ apt install -y \
   libvirt-daemon-system libvirt-clients virtinst \
   ufw net-tools curl >> "$LOG_FILE" 2>&1
 
-# Создание пользователя
-log "[*] Создание пользователя tikhon (если не существует)..."
-id -u tikhon &>/dev/null || useradd -m -s /bin/bash tikhon
-
-# Создание директории
+# Создание директории для бота
 log "[*] Создание директории для бота..."
 mkdir -p /opt/fail2ban-telegram-bot
-chown tikhon:tikhon /opt/fail2ban-telegram-bot
+chown $SUDO_USER:$SUDO_USER /opt/fail2ban-telegram-bot
 
 # Создание виртуального окружения и установка зависимостей
 log "[*] Создание виртуального окружения Python и установка зависимостей..."
-sudo -u tikhon bash << 'EOF'
+sudo -u $SUDO_USER bash << 'EOF'
 cd /opt/fail2ban-telegram-bot
 python3 -m venv venv
 source venv/bin/activate
@@ -62,10 +59,11 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # === НАСТРОЙКИ ===
-# Укажи свой токен бота (получить у @BotFather в Telegram)
+# !!! ВАЖНО: Замените плейсхолдеры на ваши личные данные !!!
+# Получите токен у @BotFather в Telegram
 BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
 
-# Укажи свой Chat ID (узнать можно через @userinfobot)
+# Узнайте свой Chat ID через @userinfobot или @myidbot
 ADMIN_CHAT_ID = YOUR_CHAT_ID_HERE
 
 JAIL = "sshd"
@@ -203,7 +201,7 @@ async def check_server_status(context):
 
         # Проверка температуры
         try:
-            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
+            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'],
                                        capture_output=True, text=True, check=True)
             temp_raw = int(temp_result.stdout.strip())
             temp_celsius = temp_raw / 1000
@@ -253,7 +251,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем статус мониторинга
     monitor_status = "✅ ВКЛЮЧЕН" if 'monitor_job' in context.bot_data and context.bot_data['monitor_job'] else "❌ ВЫКЛЮЧЕН"
-    
+
     help_text = f"""
 🔧 **Fail2Ban — Справка и команды**
 
@@ -280,22 +278,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🤖 **Команды Telegram-бота:**
 
-`/check` — текущий статус защиты SSH  
-`/who` — показать активные SSH-сессии  
-`/ban <ip>` — заблокировать IP  
-`/unban <ip>` — разблокировать IP  
-`/banned` — список заблокированных IP  
-`/jailstatus` — статус всех тюрем  
-`/status` — общее состояние сервера  
-`/cpu` — загрузка CPU  
-`/temp` — температура системы  
-`/disk` — использование диска  
-`/mem` — использование памяти  
-`/top` — топ процессов  
-`/monitor` — вкл/выкл мониторинг *(текущий статус: {monitor_status})*  
+`/check` — текущий статус защиты SSH
+`/who` — показать активные SSH-сессии
+`/ban <ip>` — заблокировать IP
+`/unban <ip>` — разблокировать IP
+`/banned` — список заблокированных IP
+`/jailstatus` — статус всех тюрем
+`/status` — общее состояние сервера
+`/cpu` — загрузка CPU
+`/temp` — температура системы
+`/disk` — использование диска
+`/mem` — использование памяти
+`/top` — топ процессов
+`/monitor` — вкл/выкл мониторинг *(текущий статус: {monitor_status})*
 `/help` — эта справка
 
-💡 Совет: все настройки — через терминал.  
+💡 Совет: все настройки — через терминал.
 Уведомления о входе и блокировках приходят автоматически.
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -335,7 +333,7 @@ async def ban_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("❌ Укажите IP адрес: `/ban 1.2.3.4`", parse_mode='Markdown')
         return
-    
+
     ip = context.args[0]
     if not is_valid_ip(ip):
         await update.message.reply_text("❌ Неверный формат IP адреса.")
@@ -360,7 +358,7 @@ async def unban_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("❌ Укажите IP адрес: `/unban 1.2.3.4`", parse_mode='Markdown')
         return
-    
+
     ip = context.args[0]
     if not is_valid_ip(ip):
         await update.message.reply_text("❌ Неверный формат IP адреса.")
@@ -422,7 +420,7 @@ async def server_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Uptime
         uptime_result = subprocess.run(['uptime', '-p'], capture_output=True, text=True, check=True)
         uptime = uptime_result.stdout.strip()
-        
+
         # CPU load (исправляем форматирование)
         cpu_result = subprocess.run(['uptime'], capture_output=True, text=True, check=True)
         cpu_line = cpu_result.stdout.strip()
@@ -431,14 +429,14 @@ async def server_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cpu_load = f"{cpu_match.group(1)}, {cpu_match.group(2)}, {cpu_match.group(3)}"
         else:
             cpu_load = "Не удалось получить"
-        
+
         # Memory
         mem_result = subprocess.run(['free', '-h'], capture_output=True, text=True, check=True)
         mem_lines = mem_result.stdout.strip().split('\n')
         mem_info = mem_lines[1].split()
         mem_used = mem_info[2]
         mem_total = mem_info[1]
-        
+
         # Disk usage (summary)
         disk_result = subprocess.run(['df', '-h', '--total'], capture_output=True, text=True, check=True)
         disk_lines = disk_result.stdout.strip().split('\n')
@@ -446,11 +444,11 @@ async def server_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disk_used = disk_info[2]
         disk_total = disk_info[1]
         disk_percent = disk_info[4]
-        
+
         # Temperature
         temp = "Не доступно"
         try:
-            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
+            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'],
                                        capture_output=True, text=True, check=True)
             temp_raw = int(temp_result.stdout.strip())
             temp = f"{temp_raw/1000:.1f}°C"
@@ -467,10 +465,10 @@ async def server_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             break
             except:
                 pass
-        
+
         # Статус мониторинга
         monitor_status = "✅ ВКЛЮЧЕН" if 'monitor_job' in context.bot_data and context.bot_data['monitor_job'] else "❌ ВЫКЛЮЧЕН"
-        
+
         status_text = f"""
 📊 *Состояние сервера:*
 
@@ -491,7 +489,7 @@ async def cpu_load(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cpu_result = subprocess.run(['uptime'], capture_output=True, text=True, check=True)
         cpu_line = cpu_result.stdout.strip()
-        
+
         # Ищем load average в строке
         cpu_match = re.search(r'load average: ([\d.]+), ([\d.]+), ([\d.]+)', cpu_line)
         if cpu_match:
@@ -528,10 +526,10 @@ async def temperature(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         temp = "Не доступно"
         temp_source = "system"
-        
+
         try:
             # Основной способ
-            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
+            temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'],
                                        capture_output=True, text=True, check=True)
             temp_raw = int(temp_result.stdout.strip())
             temp = f"{temp_raw/1000:.1f}°C"
@@ -551,12 +549,12 @@ async def temperature(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     raise Exception("No temperature data found")
             except:
                 temp = "Не удалось получить температуру"
-        
+
         if temp_source == "system":
             temp_text = f"🌡 *Температура системы:*\n\n`{temp}`"
         else:
             temp_text = f"🌡 *Температура системы (sensors):*\n\n{temp}"
-            
+
         await update.message.reply_text(temp_text, parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка получения температуры: `{e}`")
@@ -567,15 +565,15 @@ async def disk_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = subprocess.run(['df', '-h'], capture_output=True, text=True, check=True)
         lines = result.stdout.strip().split('\n')
-        
+
         # Фильтруем только локальные файловые системы (исключаем tmpfs и т.п.)
         filtered_lines = [line for line in lines if line.startswith(('/dev/', 'tmpfs'))]
-        
+
         if filtered_lines:
             disk_info = "💿 *Использование диска:*\n```\n"
             disk_info += f"{'Файловая система':<20} {'Размер':<8} {'Использ.':<8} {'Доступно':<8} {'Исп.%':<6} {'Точка монтирования'}\n"
             disk_info += "-" * 70 + "\n"
-            
+
             for line in filtered_lines:
                 parts = line.split()
                 if len(parts) >= 6:
@@ -586,7 +584,7 @@ async def disk_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     perc = parts[4]
                     mount = parts[5]
                     disk_info += f"{fs:<20} {size:<8} {used:<8} {avail:<8} {perc:<6} {mount}\n"
-            
+
             disk_info += "```"
             await update.message.reply_text(disk_info, parse_mode='Markdown')
         else:
@@ -600,11 +598,11 @@ async def memory_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = subprocess.run(['free', '-h'], capture_output=True, text=True, check=True)
         lines = result.stdout.strip().split('\n')
-        
+
         if len(lines) >= 3:
             mem_line = lines[1].split()
             swap_line = lines[2].split()
-            
+
             mem_info = f"""
 🧠 *Использование памяти:*
 
@@ -631,14 +629,14 @@ async def top_processes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = subprocess.run(['top', '-b', '-n', '1'], capture_output=True, text=True, check=True)
         lines = result.stdout.strip().split('\n')
-        
+
         # Находим строку с заголовками процессов
         header_index = -1
         for i, line in enumerate(lines):
             if 'PID' in line and 'USER' in line and 'CPU' in line:
                 header_index = i
                 break
-        
+
         if header_index != -1:
             # Берем заголовок и следующие 20 строк
             process_lines = lines[header_index:header_index+21]
@@ -662,12 +660,12 @@ async def monitor_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not hasattr(context, 'job_queue') or not context.job_queue:
         await update.message.reply_text("❌ Ошибка: Job queue недоступен.", parse_mode='Markdown')
         return
-    
+
     if 'monitor_job' not in context.bot_data or not context.bot_data['monitor_job']:
         # Запускаем мониторинг
         try:
             monitor_job = context.job_queue.run_repeating(
-                check_server_status, 
+                check_server_status,
                 interval=60,  # Проверка каждую минуту
                 first=10
             )
@@ -695,10 +693,10 @@ def is_valid_ip(ip):
 if __name__ == '__main__':
     # Загружаем лог уведомлений
     load_notify_log()
-    
+
     # Создаем приложение
     app = Application.builder().token(BOT_TOKEN).build()
-    
+
     print("✅ Job queue инициализирован успешно")
 
     # Хэндлеры
@@ -724,7 +722,7 @@ if __name__ == '__main__':
 EOF
 
 chmod +x /opt/fail2ban-telegram-bot/bot.py
-chown tikhon:tikhon /opt/fail2ban-telegram-bot/bot.py
+chown $SUDO_USER:$SUDO_USER /opt/fail2ban-telegram-bot/bot.py
 
 # Создание SSH-notify скрипта
 log "[*] Создание SSH-notify скрипта..."
@@ -739,19 +737,18 @@ HOST=$(hostname)
 [ "$USER" = "root" ] && exit 0
 [ -z "$IP" ] && exit 0
 
-# Настройки Telegram
-# Укажи свой токен бота и Chat ID
+# !!! ВАЖНО: Замените плейсхолдеры на ваши личные данные !!!
 TOKEN="YOUR_BOT_TOKEN_HERE"
 CHAT_ID=YOUR_CHAT_ID_HERE
 
 # При входе
 if [ -z "$SSH_ORIGINAL_COMMAND" ]; then
-    MESSAGE="🔐 *Вход по SSH*  
-*Пользователь:* \`$USER\`  
-*IP:* \`$IP\`  
-*Сервер:* $HOST  
+    MESSAGE="🔐 *Вход по SSH*
+*Пользователь:* \`$USER\`
+*IP:* \`$IP\`
+*Сервер:* $HOST
 *Время:* $(date '+%d.%m.%Y %H:%M:%S')"
-    
+
     /usr/bin/curl -s -X POST \
       -H 'Content-Type: application/json' \
       -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\", \"parse_mode\": \"Markdown\"}" \
@@ -761,12 +758,12 @@ fi
 
 # При выходе
 trap '
-    MESSAGE="🚪 *Выход из SSH*  
-*Пользователь:* \`$USER\`  
-*IP:* \`$IP\`  
-*Сервер:* $HOST  
+    MESSAGE="🚪 *Выход из SSH*
+*Пользователь:* \`$USER\`
+*IP:* \`$IP\`
+*Сервер:* $HOST
 *Время:* $(date '"'"'+%d.%m.%Y %H:%M:%S'"'"')"
-    
+
     /usr/bin/curl -s -X POST \
       -H "Content-Type: application/json" \
       -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\", \"parse_mode\": \"Markdown\"}" \
@@ -801,20 +798,20 @@ IP=$2
 NAME=$3
 FAILURES=$4
 
-# Укажи свой токен бота и Chat ID
+# !!! ВАЖНО: Замените плейсхолдеры на ваши личные данные !!!
 TOKEN="YOUR_BOT_TOKEN_HERE"
 CHAT_ID=YOUR_CHAT_ID_HERE
 
 if [ "$ACTION" = "ban" ]; then
-    MESSAGE="🚫 *Fail2Ban заблокировал IP*  
-*IP:* \`$IP\`  
-*Jail:* $NAME  
-*Попытки:* $FAILURES  
+    MESSAGE="🚫 *Fail2Ban заблокировал IP*
+*IP:* \`$IP\`
+*Jail:* $NAME
+*Попытки:* $FAILURES
 *Время:* $(date '+%d.%m.%Y %H:%M:%S')"
 elif [ "$ACTION" = "unban" ]; then
-    MESSAGE="✅ *Fail2Ban разблокировал IP*  
-*IP:* \`$IP\`  
-*Jail:* $NAME  
+    MESSAGE="✅ *Fail2Ban разблокировал IP*
+*IP:* \`$IP\`
+*Jail:* $NAME
 *Время:* $(date '+%d.%m.%Y %H:%M:%S')"
 else
     exit 0
@@ -837,8 +834,8 @@ enabled   = true
 maxretry  = 4
 findtime  = 20m
 bantime   = 1d
-# Укажи свой IP для исключения из блокировок
-ignoreip  = 127.0.0.1/8 YOUR_IP_HERE 192.168.1.16 
+# !!! ВАЖНО: Замените YOUR_IP_HERE на ваш IP для исключения из блокировок !!!
+ignoreip  = 127.0.0.1/8 YOUR_IP_HERE 192.168.1.16
 destemail = your-email@example.com
 logpath   = /var/log/auth.log
 action = iptables[name=SSH, port=ssh, protocol=tcp]
@@ -847,14 +844,14 @@ EOF
 
 # Создание systemd-сервиса для бота
 log "[*] Создание systemd-сервиса для бота..."
-cat << 'EOF' > /etc/systemd/system/fail2ban-tgbot.service
+cat << EOF > /etc/systemd/system/fail2ban-tgbot.service
 [Unit]
 Description=Fail2Ban Telegram Bot
 After=network.target
 
 [Service]
 Type=simple
-User=tikhon
+User=$SUDO_USER
 WorkingDirectory=/opt/fail2ban-telegram-bot
 ExecStart=/opt/fail2ban-telegram-bot/venv/bin/python /opt/fail2ban-telegram-bot/bot.py
 Restart=always
@@ -878,3 +875,4 @@ ufw allow 9090  # Cockpit >> "$LOG_FILE" 2>&1
 
 log "[+] Установка завершена! Перезагрузите сервер для полной работоспособности."
 log "[*] Лог установки: $LOG_FILE"
+log "⚠️  Не забудьте открыть файлы конфигурации и заменить плейсхолдеры на ваши личные данные!"
