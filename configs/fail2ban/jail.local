@@ -1,0 +1,11 @@
+[sshd]
+enabled   = true
+maxretry  = 4
+findtime  = 20m
+bantime   = 1d
+# !!! ВАЖНО: Замените YOUR_IP_HERE на ваш IP для исключения из блокировок !!!
+ignoreip  = 127.0.0.1/8 YOUR_IP_HERE 192.168.1.16 
+destemail = your-email@example.com
+logpath   = /var/log/auth.log
+action = iptables[name=SSH, port=ssh, protocol=tcp]
+         telegram[name=SSH]
