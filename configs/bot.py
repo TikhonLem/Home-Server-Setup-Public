@@ -189,7 +189,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Привет! Я Home Server Bot.\n\n"
         "Доступные команды:\n"
         "  /help — справка\n"
-        "  /status — общее состояние сервера\n"
+        "  /status — общее состояние сервера *(с кнопками)*\n"
         "  /check — статус SSH\n"
         "  /who — активные сессии\n"
         "  /ban <ip> — заблокировать IP\n"
@@ -208,7 +208,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем статус мониторинга
-    monitor_status = "✅ ВКЛЮЧЕН" if 'monitor_job' in context.bot_data and context.bot_data['monitor_job'] else "❌ ВЫКЛЮЧЕН"
+    monitor_status = "✅ ВКЛЮЧЕН" if context.bot_data.get('monitor_job') else "❌ ВЫКЛЮЧЕН"
     
     help_text = f"""
 🔧 **Fail2Ban — Справка и команды**
@@ -310,13 +310,18 @@ async def server_status_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except:
             temp_celsius = 0
 
-        # Формируем текст с прогресс-барами
+        # Статус мониторинга
+        monitor_status = "✅ ВКЛ" if context.bot_data.get('monitor_job') else "❌ ВЫКЛ"
+
+        # Формируем текст с прогресс-барами и временем для обхода ошибки
         status_text = (
             f"📊 *Состояние сервера*\n\n"
             f"🧠 CPU: {create_progress_bar(cpu_percent)}\n"
             f"💾 Память: {create_progress_bar(mem_percent)}\n"
             f"💿 Диск: {create_progress_bar(disk_percent)}\n"
             f"🌡 Температура: `{temp_celsius:.1f}°C`\n"
+            f"🔍 Мониторинг: `{monitor_status}`\n"
+            f"🕐 Время: `{time.strftime('%H:%M:%S')}`"
         )
 
         # Кнопки
@@ -331,6 +336,7 @@ async def server_status_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if update.message:
             await update.message.reply_text(status_text, parse_mode='Markdown', reply_markup=reply_markup)
         elif update.callback_query:
+            # При обновлении добавляем уникальный элемент, чтобы избежать ошибки
             await update.callback_query.edit_message_text(text=status_text, parse_mode='Markdown', reply_markup=reply_markup)
             await update.callback_query.answer()
 
@@ -434,19 +440,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if filtered_lines:
                 disk_info = "💿 *Использование диска*\n```\n"
-                disk_info += f"{'Файловая система':<20} {'Размер':<8} {'Использ.':<8} {'Доступно':<8} {'Исп.%':<6} {'Точка монтирования'}\n"
-                disk_info += "-" * 70 + "\n"
+                disk_info += f"{'ФС':<15} {'Размер':<8} {'Исп.':<8} {'Дост.':<8} {'Исп.%':<6} {'Точка монт.'}\n"
+                disk_info += "-" * 65 + "\n"
                 
                 for line in filtered_lines:
                     parts = line.split()
                     if len(parts) >= 6:
-                        fs = parts[0][:19]  # Ограничиваем длину
+                        fs = parts[0][:14]  # Ограничиваем длину
                         size = parts[1]
                         used = parts[2]
                         avail = parts[3]
                         perc = parts[4]
-                        mount = parts[5]
-                        disk_info += f"{fs:<20} {size:<8} {used:<8} {avail:<8} {perc:<6} {mount}\n"
+                        mount = parts[5][:15] # Ограничиваем длину точки монтирования
+                        disk_info += f"{fs:<15} {size:<8} {used:<8} {avail:<8} {perc:<6} {mount}\n"
                 
                 disk_info += "```"
                 
@@ -579,40 +585,30 @@ async def jail_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: `{e}`")
 
-# /cpu — загрузка CPU
+# /cpu — загрузка CPU (улучшенный формат)
 @restricted
 async def cpu_load(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # CPU Load
         cpu_result = subprocess.run(['uptime'], capture_output=True, text=True, check=True)
         cpu_line = cpu_result.stdout.strip()
-        
-        # Ищем load average в строке
         cpu_match = re.search(r'load average: ([\d.]+), ([\d.]+), ([\d.]+)', cpu_line)
         if cpu_match:
             load_1min, load_5min, load_15min = map(float, cpu_match.groups())
-            cpu_text = f"""
-🧠 *Загрузка CPU:*
-
-`{load_1min:.2f}, {load_5min:.2f}, {load_15min:.2f}`
-"""
-            await update.message.reply_text(cpu_text, parse_mode='Markdown')
         else:
-            # Если не нашли load average, попробуем получить через top
-            top_result = subprocess.run(['top', '-b', '-n', '1'], capture_output=True, text=True, check=True)
-            top_lines = top_result.stdout.strip().split('\n')
-            for line in top_lines:
-                if 'load average:' in line:
-                    load_avg = re.search(r'load average: ([\d.]+), ([\d.]+), ([\d.]+)', line)
-                    if load_avg:
-                        load_1min, load_5min, load_15min = map(float, load_avg.groups())
-                        cpu_text = f"""
-🧠 *Загрузка CPU:*
-
-`{load_1min:.2f}, {load_5min:.2f}, {load_15min:.2f}`
-"""
-                        await update.message.reply_text(cpu_text, parse_mode='Markdown')
-                        return
-            await update.message.reply_text("❌ Не удалось получить данные о загрузке CPU.")
+            load_1min, load_5min, load_15min = "N/A", "N/A", "N/A"
+        
+        # CPU Cores
+        cpu_cores_result = subprocess.run(['nproc'], capture_output=True, text=True, check=True)
+        cpu_cores = cpu_cores_result.stdout.strip()
+        
+        cpu_text = (
+            f"🧠 *Загрузка CPU*\n"
+            f"📈 Load Average: `{load_1min}, {load_5min}, {load_15min}`\n"
+            f"🔢 Ядер: `{cpu_cores}`"
+        )
+        await update.message.reply_text(cpu_text, parse_mode='Markdown')
+        
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка получения загрузки CPU: `{e}`")
 
@@ -667,19 +663,19 @@ async def disk_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if filtered_lines:
             disk_info = "💿 *Использование диска:*\n```\n"
-            disk_info += f"{'Файловая система':<20} {'Размер':<8} {'Использ.':<8} {'Доступно':<8} {'Исп.%':<6} {'Точка монтирования'}\n"
-            disk_info += "-" * 70 + "\n"
+            disk_info += f"{'ФС':<15} {'Размер':<8} {'Исп.':<8} {'Дост.':<8} {'Исп.%':<6} {'Точка монт.'}\n"
+            disk_info += "-" * 65 + "\n"
             
             for line in filtered_lines:
                 parts = line.split()
                 if len(parts) >= 6:
-                    fs = parts[0][:19]  # Ограничиваем длину
+                    fs = parts[0][:14]  # Ограничиваем длину
                     size = parts[1]
                     used = parts[2]
                     avail = parts[3]
                     perc = parts[4]
-                    mount = parts[5]
-                    disk_info += f"{fs:<20} {size:<8} {used:<8} {avail:<8} {perc:<6} {mount}\n"
+                    mount = parts[5][:15] # Ограничиваем длину точки монтирования
+                    disk_info += f"{fs:<15} {size:<8} {used:<8} {avail:<8} {perc:<6} {mount}\n"
             
             disk_info += "```"
             await update.message.reply_text(disk_info, parse_mode='Markdown')
@@ -757,7 +753,7 @@ async def monitor_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ошибка: Job queue недоступен.", parse_mode='Markdown')
         return
     
-    if 'monitor_job' not in context.bot_data or not context.bot_data['monitor_job']:
+    if not context.bot_data.get('monitor_job'):
         # Запускаем мониторинг
         try:
             monitor_job = context.job_queue.run_repeating(
