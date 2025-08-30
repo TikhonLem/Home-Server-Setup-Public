@@ -20,6 +20,8 @@ log "🚀 Starting installation..."
 ./modules/03_setup_configs.sh
 ./modules/04_setup_services.sh
 ./modules/05_setup_firewall.sh
+./modules/06_setup_aliases.sh
 
 log "✅ Installation complete! Please reboot the server for full functionality."
 log "⚠️  Remember to replace placeholders in config files with your personal data!"
+log "💡 Run 'source ~/.bashrc' or restart your shell to use new aliases."
