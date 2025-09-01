@@ -7,14 +7,15 @@ import json
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+from urllib.parse import parse_qs
+import asyncio
 
 # === НАСТРОЙКИ ===
-# !!! ВАЖНО: Замените плейсхолдеры на ваши личные данные !!!
-# Получите токен у @BotFather в Telegram
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-
-# Узнайте свой Chat ID через @userinfobot или @myidbot
-ADMIN_CHAT_ID = YOUR_CHAT_ID_HERE
+# ВАЖНО: Убедитесь, что эти данные соответствуют вашей домашней версии
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Замени на твой реальный токен бота
+ADMIN_CHAT_ID = 981471707  # Замени на свой Chat ID
 
 JAIL = "sshd"
 
@@ -31,6 +32,9 @@ NOTIFY_LOG_FILE = '/tmp/server_monitor_notify_log.json'
 
 # Таймер блокировки уведомлений (в секундах) - 30 минут
 NOTIFY_COOLDOWN = 1800
+
+# Порт для webhook (для Alertmanager)
+WEBHOOK_PORT = 8080
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -98,8 +102,8 @@ def create_progress_bar(percentage, width=10):
     bar = '█' * filled + '░' * (width - filled)
     return f"[{bar}] {percentage:.1f}%"
 
-# Отправляем уведомление
-async def send_alert(context, alert_type, level, message):
+# Отправляем уведомление (асинхронная версия)
+async def send_alert_async(context, alert_type, level, message):
     if can_notify(alert_type):
         alert_text = f"{format_alert_level(level)} {message}"
         try:
@@ -110,6 +114,98 @@ async def send_alert(context, alert_type, level, message):
             logger.error(f"Ошибка отправки уведомления: {e}")
     else:
         logger.info(f"Уведомление {alert_type} заблокировано (cooldown)")
+
+# Отправляем уведомление (синхронная версия для webhook)
+def send_alert_sync(bot_app, alert_type, level, message):
+    if can_notify(alert_type):
+        alert_text = f"{format_alert_level(level)} {message}"
+        try:
+            # Получаем event loop или создаем новый
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Выполняем асинхронную отправку в синхронном контексте
+            loop.run_until_complete(bot_app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=alert_text, parse_mode='Markdown'))
+            update_notify_time(alert_type)
+            logger.info(f"Отправлено уведомление: {alert_type} - {level}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления: {e}")
+    else:
+        logger.info(f"Уведомление {alert_type} заблокировано (cooldown)")
+
+# Обработчик алертов от Alertmanager
+class AlertHandler(BaseHTTPRequestHandler):
+    def __init__(self, bot_app, *args, **kwargs):
+        self.bot_app = bot_app
+        super().__init__(*args, **kwargs)
+    
+    def do_POST(self):
+        try:
+            # Получаем длину тела запроса
+            content_length = int(self.headers['Content-Length'])
+            # Читаем тело запроса
+            post_data = self.rfile.read(content_length)
+            
+            # Парсим JSON
+            alert_data = json.loads(post_data)
+            logger.info(f"Получен алерт: {alert_data}")
+            
+            # Обрабатываем алерт
+            self.process_alert(alert_data)
+            
+            # Отправляем ответ
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        except Exception as e:
+            logger.error(f"Ошибка обработки webhook: {e}")
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b'Error')
+    
+    def process_alert(self, alert_data):
+        try:
+            # Получаем информацию из алерта
+            alerts = alert_data.get('alerts', [])
+            for alert in alerts:
+                # Определяем статус алерта
+                status = alert.get('status', 'unknown')
+                labels = alert.get('labels', {})
+                annotations = alert.get('annotations', {})
+                
+                # Получаем данные алерта
+                alertname = labels.get('alertname', 'Unknown Alert')
+                severity = labels.get('severity', 'unknown')
+                summary = annotations.get('summary', 'No summary')
+                description = annotations.get('description', 'No description')
+                
+                # Формируем сообщение
+                if status == 'firing':
+                    emoji = "🚨"
+                    status_text = "Сработал алерт"
+                elif status == 'resolved':
+                    emoji = "✅"
+                    status_text = "Алерт разрешился"
+                else:
+                    emoji = "⚠️"
+                    status_text = f"Статус алерта: {status}"
+                
+                message = f"{emoji} *{status_text}*\n\n📝 *Название:* {alertname}\n⚠️ *Уровень:* {severity}\n📋 *Сводка:* {summary}\n📄 *Описание:* {description}"
+                
+                # Отправляем сообщение в Telegram (синхронно)
+                send_alert_sync(self.bot_app, f"alert_{alertname}", severity, message)
+                logger.info(f"Отправлен алерт в Telegram: {alertname}")
+        except Exception as e:
+            logger.error(f"Ошибка обработки алерта: {e}")
+
+# Фабрика для создания обработчиков с передачей bot_app
+def make_handler(bot_app):
+    def handler(*args, **kwargs):
+        return AlertHandler(bot_app, *args, **kwargs)
+    return handler
 
 # Проверка состояния сервера
 async def check_server_status(context):
@@ -128,7 +224,7 @@ async def check_server_status(context):
             level = get_alert_level(cpu_percent, THRESHOLDS['cpu'])
             if level != 'normal':
                 message = f"🧠 *Загрузка CPU*: `{cpu_percent:.1f}%`\n1 мин: `{load_1min}`, 5 мин: `{load_5min}`, 15 мин: `{load_15min}`, Ядер: `{cpu_cores}`"
-                await send_alert(context, 'cpu', level, message)
+                await send_alert_async(context, 'cpu', level, message)
 
         # Проверка памяти
         mem_result = subprocess.run(['free'], capture_output=True, text=True, check=True)
@@ -142,7 +238,7 @@ async def check_server_status(context):
                 level = get_alert_level(mem_percent, THRESHOLDS['memory'])
                 if level != 'normal':
                     message = f"💾 *Память*: `{mem_percent:.1f}%` использовано\nИспользовано: `{mem_used//1024//1024}MB` из `{mem_total//1024//1024}MB`"
-                    await send_alert(context, 'memory', level, message)
+                    await send_alert_async(context, 'memory', level, message)
 
         # Проверка диска
         disk_result = subprocess.run(['df', '/'], capture_output=True, text=True, check=True)
@@ -155,7 +251,7 @@ async def check_server_status(context):
                 level = get_alert_level(disk_percent, THRESHOLDS['disk'])
                 if level != 'normal':
                     message = f"💿 *Диск*: `{disk_percent}%` занято\nФайловая система: `{disk_info[0]}`\nТочка монтирования: `{disk_info[5]}`"
-                    await send_alert(context, 'disk', level, message)
+                    await send_alert_async(context, 'disk', level, message)
 
         # Проверка температуры
         try:
@@ -166,7 +262,7 @@ async def check_server_status(context):
             level = get_alert_level(temp_celsius, THRESHOLDS['temperature'])
             if level != 'normal':
                 message = f"🌡 *Температура*: `{temp_celsius:.1f}°C`"
-                await send_alert(context, 'temperature', level, message)
+                await send_alert_async(context, 'temperature', level, message)
         except:
             pass  # Температура не доступна
 
@@ -707,8 +803,7 @@ async def memory_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Swap:*
 ├─ Всего: `{swap_line[1]}`
 ├─ Использовано: `{swap_line[2]}`
-└─ Свободно: `{swap_line[3]}`
-"""
+└─ Свободно: `{swap_line[3]}`"""
             await update.message.reply_text(mem_info, parse_mode='Markdown')
         else:
             await update.message.reply_text("❌ Не удалось получить информацию о памяти.")
@@ -811,6 +906,13 @@ if __name__ == '__main__':
     # Добавляем хендлер для кнопок
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    # Запуск webhook-сервера в отдельном потоке
+    handler = make_handler(app)
+    server = HTTPServer(('', WEBHOOK_PORT), handler)
+    webhook_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    webhook_thread.start()
+    logger.info(f"Webhook сервер запущен на порту {WEBHOOK_PORT}")
+    
     logger.info("Home Server Bot запущен и готов к работе")
     print("✅ Home Server Bot запущен. Ожидание команд...")
     app.run_polling()
